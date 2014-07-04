@@ -8,6 +8,7 @@ from django.core.urlresolvers import reverse
 from django.db.models import get_model
 from django.forms.widgets import Select
 from django.utils.safestring import mark_safe
+from django.utils import simplejson
 
 from smart_selects.utils import unicode_sorter
 
@@ -23,13 +24,11 @@ URL_PREFIX = getattr(settings, "SMART_SELECTS_URL_PREFIX", "")
 
 
 class ChainedSelect(Select):
-    def __init__(self, app_name, model_name, chain_field,
-                 model_field, show_all, auto_choose,
-                 manager=None, view_name=None, *args, **kwargs):
+    def __init__(self, app_name, model_name, chain_fields, show_all,
+                    auto_choose, manager=None, view_name=None, *args, **kwargs):
         self.app_name = app_name
         self.model_name = model_name
-        self.chain_field = chain_field
-        self.model_field = model_field
+        self.chain_fields = chain_fields
         self.show_all = show_all
         self.auto_choose = auto_choose
         self.manager = manager
@@ -49,9 +48,11 @@ class ChainedSelect(Select):
 
     def render(self, name, value, attrs=None, choices=()):
         if len(name.split('-')) > 1:  # formset
-            chain_field = '-'.join(name.split('-')[:-1] + [self.chain_field])
+            chain_fields = []
+            for field, model_field in self.chain_fields.items():
+                chain_fields.append('-'.join(name.split('-')[:-1] + [field]))
         else:
-            chain_field = self.chain_field
+            chain_fields = self.chain_fields
         if not self.view_name:
             if self.show_all:
                 view_name = "chained_filter_all"
@@ -59,11 +60,10 @@ class ChainedSelect(Select):
                 view_name = "chained_filter"
         else:
             view_name = self.view_name
-        kwargs = {'app': self.app_name, 'model': self.model_name,
-                  'field': self.model_field, 'value': "1"}
+        kwargs = {'app': self.app_name, 'model': self.model_name, }
         if self.manager is not None:
             kwargs.update({'manager': self.manager})
-        url = URL_PREFIX + ("/".join(reverse(view_name, kwargs=kwargs).split("/")[:-2]))
+        url = reverse(view_name, kwargs=kwargs)
         if self.auto_choose:
             auto_choose = 'true'
         else:
@@ -100,15 +100,18 @@ class ChainedSelect(Select):
             }
 
             $(document).ready(function(){
-                function fill_field(val, init_value){
-                    if (!val || val==''){
-                        options = '<option value="">%(empty_label)s<'+'/option>';
-                        $("#%(id)s").html(options);
-                        $('#%(id)s option:first').attr('selected', 'selected');
-                        $("#%(id)s").trigger('change');
-                        return;
-                    }
-                    $.getJSON("%(url)s/"+val+"/", function(j){
+                var chainfields = $.parseJSON('%(chainfields_json)s');
+                function fill_field(values, init_value){
+                    $.each(values, function(model, val){
+                        if (!val || val==''){
+                            options = '<option value="">%(empty_label)s<'+'/option>';
+                            $("#%(id)s").html(options);
+                            $('#%(id)s option:first').attr('selected', 'selected');
+                            $("#%(id)s").trigger('change');
+                            return;
+                        }
+                    });
+                    $.getJSON("%(url)s", values, function(j){
                         var options = '<option value="">%(empty_label)s<'+'/option>';
                         for (var i = 0; i < j.length; i++) {
                             options += '<option value="' + j[i].value + '">' + j[i].display + '<'+'/option>';
@@ -129,23 +132,30 @@ class ChainedSelect(Select):
                     })
                 }
 
-                if(!$("#id_%(chainfield)s").hasClass("chained")){
-                    var val = $("#id_%(chainfield)s").val();
-                    fill_field(val, "%(value)s");
+                if(!$("%(chainfields_ids)s").hasClass("chained")){
+                    var values = {};
+                    $.each(chainfields, function(field, model){
+                        values[model] = $("#id_"+field).val();
+                    });
+
+                    fill_field(values, "%(value)s");
                 }
 
-                $("#id_%(chainfield)s").change(function(){
+                $("%(chainfields_ids)s").change(function(){
                     var start_value = $("#%(id)s").val();
-                    var val = $(this).val();
-                    fill_field(val, start_value);
+                    var values = {};
+                    $.each(chainfields, function(field, model){
+                        values[model] = $("#id_"+field).val();
+                    });
+                    fill_field(values, start_value);
                 })
             })
             if (typeof(dismissAddAnotherPopup) !== 'undefined') {
                 var oldDismissAddAnotherPopup = dismissAddAnotherPopup;
                 dismissAddAnotherPopup = function(win, newId, newRepr) {
                     oldDismissAddAnotherPopup(win, newId, newRepr);
-                    if (windowname_to_id(win.name) == "id_%(chainfield)s") {
-                        $("#id_%(chainfield)s").change();
+                    if (windowname_to_id(win.name) == "%(chainfields_ids)s") {
+                        $("%(chainfields_ids)s").change();
                     }
                 }
             }
@@ -154,7 +164,8 @@ class ChainedSelect(Select):
         </script>
 
         """
-        js = js % {"chainfield": chain_field,
+        js = js % {"chainfields_ids": u','.join(['#id_%s' % field for field in chain_fields.keys()]),
+                   "chainfields_json": simplejson.dumps(chain_fields),
                    "url": url,
                    "id": attrs['id'],
                    'value': value,
@@ -164,19 +175,21 @@ class ChainedSelect(Select):
 
         if value:
             item = self.queryset.filter(pk=value)[0]
-            try:
-                pk = getattr(item, self.model_field + "_id")
-                filter = {self.model_field: pk}
-            except AttributeError:
-                try:  # maybe m2m?
-                    pks = getattr(item, self.model_field).all().values_list('pk', flat=True)
-                    filter = {self.model_field + "__in": pks}
+            filter = {}
+            for field, model_field in self.chain_fields.items():
+                try:
+                    pk = getattr(item, model_field + "_id")
+                    filter[model_field] = pk
                 except AttributeError:
-                    try:  # maybe a set?
-                        pks = getattr(item, self.model_field + "_set").all().values_list('pk', flat=True)
-                        filter = {self.model_field + "__in": pks}
-                    except:  # give up
-                        filter = {}
+                    try:  # maybe m2m?
+                        pks = getattr(item, model_field).all().values_list('pk', flat=True)
+                        filter[model_field + "__in"] = pks
+                    except AttributeError:
+                        try:  # maybe a set?
+                            pks = getattr(item, model_field + "_set").all().values_list('pk', flat=True)
+                            filter[model_field + "__in"] = pks
+                        except: pass
+
             filtered = list(get_model(self.app_name, self.model_name).objects.filter(**filter).distinct())
             filtered.sort(cmp=locale.strcoll, key=lambda x: unicode_sorter(unicode(x)))
             for choice in filtered:

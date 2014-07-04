@@ -3,22 +3,29 @@ import locale
 from django.db.models import get_model
 from django.http import HttpResponse
 from django.utils import simplejson
+from django.contrib.auth.decorators import login_required
 
 from smart_selects.utils import unicode_sorter
 
 
-def filterchain(request, app, model, field, value, manager=None):
+@login_required(login_url='/')
+def filterchain(request, app, model, manager=None):
     model_class = get_model(app, model)
-    if value == '0':
-        keywords = {str("%s__isnull" % field): True}
-    else:
-        keywords = {str(field): str(value)}
+    keywords = {}
+    for field, value in request.GET.items():
+        if value == '0':
+            keywords[str("%s__isnull" % field)] = True
+        else:
+            keywords[str(field)] = str(value) or None
+
     if manager is not None and hasattr(model_class, manager):
         queryset = getattr(model_class, manager)
     else:
         queryset = model_class._default_manager
 
     results = queryset.filter(**keywords)
+    if not len(keywords):
+        results = results.none()
 
     if not getattr(model_class._meta, 'ordering', False):
         results = list(results)
@@ -31,13 +38,21 @@ def filterchain(request, app, model, field, value, manager=None):
     return HttpResponse(json, mimetype='application/json')
 
 
-def filterchain_all(request, app, model, field, value):
+@login_required(login_url='/')
+def filterchain_all(request, app, model):
     model_class = get_model(app, model)
-    if value == '0':
-        keywords = {str("%s__isnull" % field): True}
-    else:
-        keywords = {str(field): str(value)}
-    results = list(model_class._default_manager.filter(**keywords))
+    keywords = {}
+    for field, value in request.GET.items():
+        if value == '0':
+            keywords[str("%s__isnull" % field)] = True
+        else:
+            keywords[str(field)] = str(value) or None
+
+    queryset = model_class._default_manager.filter(**keywords)
+    if not len(keywords):
+        queryset = queryset.none()
+
+    results = list(queryset)
     results.sort(cmp=locale.strcoll, key=lambda x: unicode_sorter(unicode(x)))
     final = []
     for item in results:

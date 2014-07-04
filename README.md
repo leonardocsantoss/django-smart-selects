@@ -1,6 +1,7 @@
-Django Smart Selects
+Django Smart Selects X - Fork of Django Smart Selects
 ====================
 
+Added: Filter several different fields.
 
 Chained Selects
 ---------------
@@ -22,9 +23,8 @@ you can do the following:
 	class Location(models.Model)
 		continent = models.ForeignKey(Continent)
 		country = ChainedForeignKey(
-			Country, 
-			chained_field="continent",
-			chained_model_field="continent", 
+			Country,
+			chained_fields={"continent": "continent", },
 			show_all=False, 
 			auto_choose=True
 		)
@@ -35,8 +35,7 @@ you can do the following:
 This example asumes that the Country Model has a continent = ForeignKey(Continent) field
 and that the Area model has country = ForeignKey(Country) field.
 
-- The chained field is the field on the same model the field should be chained too.
-- The chained model field is the field of the chained model that corresponds to the model linked too by the chained field.
+- The chained fields is the dictionary {'field': 'model', }, where field on the same model the field should be chained too and model field is the field of the chained model that corresponds to the model linked too by the chained field.
 - show_all indicates if only the filtered results should be shown or if you also want to display the other results further down.
 - auto_choose indicates that if there is only one option if it should be autoselected.
 

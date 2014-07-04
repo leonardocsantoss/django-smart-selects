@@ -7,14 +7,10 @@ from smart_selects.widgets import ChainedSelect
 
 class ChainedModelChoiceField(ModelChoiceField):
 
-    def __init__(self, app_name, model_name,
-                 chain_field, model_field, show_all,
-                 auto_choose, manager=None,
-                 initial=None, view_name=None, *args, **kwargs):
+    def __init__(self, app_name, model_name, chain_fields, show_all,
+                 auto_choose, manager=None, initial=None, view_name=None, *args, **kwargs):
         defaults = {
-            'widget': ChainedSelect(app_name, model_name, chain_field,
-                                    model_field, show_all, auto_choose,
-                                    manager, view_name),
+            'widget': ChainedSelect(app_name, model_name, chain_fields, show_all, auto_choose, manager, view_name),
         }
         defaults.update(kwargs)
         if not 'queryset' in kwargs:
